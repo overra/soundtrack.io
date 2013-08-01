@@ -256,10 +256,6 @@ function getYoutubeVideo(videoID, callback) {
                 Artist.populate(track, {
                   path: '_artist'
                 }, function(err, track) {
-
-                  console.log( 'being sent back:')
-                  console.log( track );
-
                   callback( track );
                 });
 
@@ -311,6 +307,7 @@ function startMusic() {
   var seekTo = (Date.now() - app.room.playlist[0].startTime) / 1000;
   app.room.track = app.room.playlist[0];
   
+  if (!app.room.playlist[0].sources) { return nextSong(); }
   getYoutubeVideo(app.room.playlist[0].sources['youtube'][0].id, function(track) {
     app.broadcast({
         type: 'track'
