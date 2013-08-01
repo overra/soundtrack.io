@@ -1,6 +1,6 @@
 module.exports = {
   database: {
-      name: 'soundtrack'
+      name: process.env.SOUNDTRACK_DB_NAME || 'soundtrack'
     , host: 'localhost'
   },
   sessions: {
