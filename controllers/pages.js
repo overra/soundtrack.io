@@ -1,5 +1,7 @@
 module.exports = {
   index: function(req, res, next) {
+    console.log(req.session.user);
+
     Chat.find({}).limit(10).sort('-created').populate('_author').exec(function(err, messages) {
       Playlist.find({ _creator: ((req.user) ? req.user._id : undefined) }).sort('name').exec(function(err, playlists) {
 

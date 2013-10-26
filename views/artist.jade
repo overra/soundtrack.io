@@ -12,3 +12,4 @@ block content
     for track in tracks
       li
         a(href="/#{artist.slug}/#{track.slug}/#{track._id}") #{track.title}
+        |  played <strong>#{track.plays}</strong> times

@@ -1,3 +1,26 @@
+var soundtrack = { soundcloud: { stop: function() {} } };
+
+function soundcloudUpdate() {
+  // TODO: use angularJS for this
+  var time = (soundtrack.soundcloud.position / 1000).toString().toHHMMSS();
+  var total = (soundtrack.soundcloud.duration / 1000).toString().toHHMMSS();
+  $('#current-track #time').html( time + '/' + total);
+
+  var progress = (((soundtrack.soundcloud.position / 1000) / (soundtrack.soundcloud.duration / 1000)) * 100);
+  $('#track-progress .bar').css('width', progress + '%');
+  $('#track-progress').attr('title', progress + '%');
+}
+
+function youtubeUpdate() {
+  var time = ytplayer.getCurrentTime().toString().toHHMMSS();
+  var total = ytplayer.getDuration().toString().toHHMMSS();
+  $('#current-track #time').html( time + '/' + total);
+
+  var progress = ((ytplayer.getCurrentTime() / ytplayer.getDuration()) * 100);
+  $('#track-progress .bar').css('width', progress + '%');
+  $('#track-progress').attr('title', progress + '%');
+}
+
 $(document).ready(function(){
   var sockjs = null;
   var retryTimes = [1000, 5000, 10000, 30000, 60000, 120000, 300000, 600000]; //in ms
@@ -48,9 +71,45 @@ $(document).ready(function(){
             $('#track-curator').html('the machine');
           }
 
-          ytplayer.cueVideoById( msg.data.sources.youtube[0].id );
-          ytplayer.seekTo( msg.seekTo );
-          ytplayer.playVideo();
+          soundtrack.soundcloud.stop();
+          ytplayer.stopVideo();
+          var received = new Date();
+          if ( msg.data.sources.youtube.length ) {
+            $('#screen-one > object').css('height', '300px');
+            $('#screen-one > .sound').hide().css('height', 0);
+
+            //player.setSrc('//www.youtube.com/watch?v=' + msg.data.sources.youtube[0].id );
+            //player.load();
+            //player.setCurrentTime( msg.seekTo );
+            //player.play();
+
+            ytplayer.loadVideoById( msg.data.sources.youtube[0].id , msg.seekTo );
+            clearInterval(soundtrack.tickInterval);
+            soundtrack.tickInterval = setInterval( youtubeUpdate , 1000);
+          } else {
+            $('#screen-one > object').css('height', 0);
+            $('#screen-one > .sound').show().css('height', '300px');
+
+            //audioPlayer.setSrc('//api.soundcloud.com/tracks/'+msg.data.sources.soundcloud[0].id+'/stream?client_id=' + soundcloudID )
+            //audioPlayer.load();
+            //audioPlayer.setCurrentTime( msg.seekTo );
+            //audioPlayer.play();
+
+            SC.stream("/tracks/" + msg.data.sources.soundcloud[0].id, {
+              autoPlay: true,
+              whileloading: function() {
+                var now = new Date();
+                var estimatedSeekTo = (msg.seekTo * 1000) + (now - received);
+                if (this.duration > estimatedSeekTo) {
+                  this.setPosition( estimatedSeekTo );
+                }
+              }
+            }, function(sound) {
+              soundtrack.soundcloud = sound;
+              clearInterval(soundtrack.tickInterval);
+              soundtrack.tickInterval = setInterval( soundcloudUpdate , 1000);
+            });
+          }
 
           if ($('#playlist-list li:first').data('track-id') == msg.data._id) {
             $('#playlist-list li:first').slideUp('slow', function() {
@@ -130,17 +189,8 @@ function onYouTubePlayerReady(playerId) {
 
   ytplayer.playVideo();
 
-  setInterval(function() {
-    // TODO: use angularJS for this
-    var time = ytplayer.getCurrentTime().toString().toHHMMSS();
-    var total = ytplayer.getDuration().toString().toHHMMSS();
-    $('#current-track #time').html( time + '/' + total);
-
-    var progress = ((ytplayer.getCurrentTime() / ytplayer.getDuration()) * 100);
-    $('#track-progress .bar').css('width', progress + '%');
-    $('#track-progress').attr('title', progress + '%');
-
-  }, 1000);
+  clearInterval(soundtrack.tickInterval);
+  soundtrack.tickInterval = setInterval( youtubeUpdate , 1000);
 
 };
 
@@ -212,6 +262,9 @@ $(window).on('load', function() {
 
   // All of the magic handled by SWFObject (http://code.google.com/p/swfobject/)
   swfobject.embedSWF("http://www.youtube.com/apiplayer?version=3&enablejsapi=1&playerapiid=player1", "screen-inner", "100%", "295", "9", null, null, params, atts);
+
+  //player = new MediaElementPlayer('#screen-two video');
+  //audioPlayer = new MediaElementPlayer('#screen-two audio');
 
   $('*[data-action=toggle-volume]').click(function(e) {
     e.preventDefault();
@@ -482,13 +535,19 @@ $(window).on('load', function() {
     return false;
   });
 
-  $('#search-form').on('submit', function(e) {
+  $(document).on('submit', '*[data-for=track-search]', function(e) {
     e.preventDefault();
-    $('#search-results').html('');
+    var self = this;
 
-    $.getJSON('http://gdata.youtube.com/feeds/api/videos?max-results=20&v=2&alt=jsonc&q=' + $('#search-query').val(), function(data) {
-      console.log(data.data.items);
+    $('*[data-for=track-search-results]').html('');
+    $('#search-modal').modal();
 
+    var query = $( self ).children('*[data-for=track-search-query]').val();
+    console.log( $( self ).children('*[data-for=track-search-query]') )
+    $('*[data-for=track-search-query]').val( query );
+
+    // TODO: execute in parallel
+    $.getJSON('https://gdata.youtube.com/feeds/api/videos?max-results=20&v=2&alt=jsonc&q=' + query, function(data) {
       data.data.items.forEach(function(item) {
         $('<li data-source="youtube" data-id="'+item.id+'"><img src="'+item.thumbnail.sqDefault+'" class="thumbnail-medium" />' +item.title+' </li>').on('click', function(e) {
           e.preventDefault();
@@ -501,11 +560,37 @@ $(window).on('load', function() {
             console.log(response);
           });
 
-          $('#search-results').html('');
-          $('#search-query').val('');
+          $('#search-modal').modal('hide');
+          $('*[data-for=track-search-results]').html('');
+          $('*[data-for=track-search-query]').val('');
 
           return false;
-        }).appendTo('#search-results');
+        }).appendTo('*[data-for=track-search-results]');
+      });
+    });
+
+    SC.get('/tracks', { q: query }, function(tracks, err) {
+      console.log('soundcloud returned: ' + tracks);
+      if (err || !tracks) { console.log(err); return false; }
+      console.log('soundcloud iterating...');
+      tracks.forEach(function(track) {
+        $('<li data-source="soundcloud" data-id="'+track.id+'">sc <img src="'+track.artwork_url+'" class="thumbnail-medium" />' +track.title+' </li>').on('click', function(e) {
+          e.preventDefault();
+          var self = this;
+
+          $.post('/playlist', {
+              source: $(self).data('source')
+            , id: $(self).data('id')
+          }, function(response) {
+            console.log(response);
+          });
+
+          $('#search-modal').modal('hide');
+          $('*[data-for=track-search-results]').html('');
+          $('*[data-for=track-search-query]').val('');
+
+          return false;
+        }).appendTo('*[data-for=track-search-results]');
       });
     });
 
