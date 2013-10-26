@@ -1,3 +1,4 @@
+var app = angular.module('soundtrack', ['ui.bootstrap.dialog']);
 var Soundtrack = function() {
   this.settings = {
     notifications: $.cookie('notificationsEnabled')
@@ -197,6 +198,7 @@ function unmutePlayer() {
   }
 }
 
+// Format youtube progress timer
 String.prototype.toHHMMSS = function () {
   var sec_num = parseInt(this, 10); // don't forget the second parm
   var hours   = Math.floor(sec_num / 3600);
@@ -215,34 +217,17 @@ String.prototype.toHHMMSS = function () {
   return time;
 }
 
-function AppController($scope, $http) {
-  window.updatePlaylist = function(){
-    $http.get('/playlist.json').success(function(data){
-      $scope.tracks = data;
-    });
-  }
-
-  updatePlaylist();
-}
-
-function updateUserlist() {
-  $.get('/listeners.json', function(data) {
-    $('#userlist').html('');
-    $('.user-count').html('<strong>'+data.length+'</strong> online');
-    data.forEach(function(user) {
-      // TODO: use template (Blade?)
-      $('<li data-user-id="' + user._id + '"><a href="/'+user.slug+'">'+user.username+'</a></li>').appendTo('#userlist');
-    });
-  });
-}
-
 $(window).on('load', function() {
-  updatePlaylist();
-  updateUserlist();
-
-  // breaks javascript if page doesn't have #messages
-  //$("#messages").scrollTop($("#messages")[0].scrollHeight);
-
+  
+  if (localStorage.getItem('debug')) {
+    console.warn("Debug is currently: ON");
+    console.warn("To disable run: localStorage.removeItem('debug')");
+  } else {
+    console.log("Debug is currently: OFF");
+    console.log("To enable run: localStorage.setItem('debug', true)");
+  }
+  
+  //init youtube
   // Lets Flash from another domain call JavaScript
   var params = { allowScriptAccess: 'always', 'wmode' : 'transparent' };
   // The element id of the Flash embed
@@ -251,12 +236,15 @@ $(window).on('load', function() {
   // All of the magic handled by SWFObject (http://code.google.com/p/swfobject/)
   swfobject.embedSWF("https://www.youtube.com/apiplayer?version=3&enablejsapi=1&playerapiid=player1", "screen-inner", "100%", "295", "9", null, null, params, atts);
 
+  // Toggle mute button
   $('*[data-action=toggle-volume]').click(function(e) {
     e.preventDefault();
     var self = this;
     var currentVolume = parseInt(volume.slider('getValue').val());
 
-    console.log('currentVolume is a ' + typeof(currentVolume) + ' and is ' + currentVolume);
+    if (localStorage.getItem('debug')) {
+      console.log('currentVolume is a ' + typeof(currentVolume) + ' and is ' + currentVolume);
+    }
 
     if (currentVolume) {
       mutePlayer();
@@ -269,7 +257,7 @@ $(window).on('load', function() {
     return false;
   });
 
-
+  // Set volume on slider slide
   volume = $('.slider').slider().on('slide', function(e) {
     var self = this;
     ytplayer.setVolume( $(self).val() );
@@ -508,6 +496,7 @@ $(window).on('load', function() {
     })();
   });
 
+  // Send chat
   $('#chat-form').on('submit', function(e) {
     e.preventDefault();
 
@@ -520,12 +509,15 @@ $(window).on('load', function() {
     return false;
   });
 
+  // Search for and add tracks to the room playlist
   $('#search-form').on('submit', function(e) {
     e.preventDefault();
     $('#search-results').html('');
 
     $.getJSON('http://gdata.youtube.com/feeds/api/videos?max-results=20&v=2&alt=jsonc&q=' + $('#search-query').val(), function(data) {
-      console.log(data.data.items);
+      if (localStorage.getItem('debug')) {
+        console.log('youtube_gdata_response', data.data.items);
+      }
 
       data.data.items.forEach(function(item) {
         $('<li data-source="youtube" data-id="'+item.id+'"><img src="'+item.thumbnail.sqDefault+'" class="thumbnail-medium" />' +item.title+' </li>').on('click', function(e) {
@@ -536,7 +528,9 @@ $(window).on('load', function() {
               source: $(self).data('source')
             , id: $(self).data('id')
           }, function(response) {
-            console.log(response);
+            if (localStorage.getItem('debug')) {
+              console.log('add_track_response', response);
+            }
           });
 
           $('#search-results').html('');
@@ -550,37 +544,7 @@ $(window).on('load', function() {
     return false;
   });
 
-  $('#create-playlist-form').on('submit', function(e) {
-    e.preventDefault();
-    var self = this;
-
-    $('#create-playlist-modal').modal('hide');
-    // TODO: use real username, if only for rest purposes.
-    $.post('/username/playlists', {
-        name:        $('#create-playlist-form input[name=name]').val()
-      , description: $('#create-playlist-form textarea[name=description]').val()
-      , trackID:     $('input[name=current-track-id]').val()
-    }, function(data) {
-      console.log('playlist created!');
-
-      $('<li data-playlist-id="'+ data.results._id +'" data-action="save-track"><a data-playlist-id="'+ data.results._id +'" data-action="save-track">'+ data.results.name +'</a></li>').insertBefore('ul[data-for=user-playlists] li:last-child');
-
-    });
-    return false;
-  });
-
-  $(document).on('click', '*[data-action=save-track]', function(e) {
-    var self = this;
-
-    $.post('/' + $('a[data-for=user-model]').data('username') +'/playlists/' + $(self).data('playlist-id'), {
-      trackID: $('input[name=current-track-id]').val()
-    }, function(data) {
-      // TODO: update UI with correct count
-      console.log(data);
-    });
-
-  });
-
+  // Upvote track in playlist
   $(document).on('click', '*[data-action=upvote-track]', function(e) {
     e.preventDefault();
     var self = this;
@@ -588,12 +552,15 @@ $(window).on('load', function() {
     $.post('/playlist/' + $(self).data('track-id'), {
       v: 'up'
     }, function(data) {
-      console.log(data);
+      if (localStorage.getItem('debug')) {
+        console.log('upvote_response', data);
+      }
     });
 
     return false;
   });
 
+  // Downvote track in playlist
   $(document).on('click', '*[data-action=downvote-track]', function(e) {
     e.preventDefault();
     var self = this;
@@ -601,12 +568,15 @@ $(window).on('load', function() {
     $.post('/playlist/' + $(self).data('track-id'), {
       v: 'down'
     }, function(data) {
-      console.log(data);
+      if (localStorage.getItem('debug')) {
+        console.log('downvote_response', data);
+      }
     });
 
     return false;
   });
 
+  // Mention user by clicking their name
   $(document).on('click', '.message *[data-role=author]', function(e) {
     e.preventDefault();
     var self = this;
@@ -615,6 +585,7 @@ $(window).on('load', function() {
     return false;
   });
 
+  // Toggle chat covering video
   $(document).on('click', '*[data-action=toggle-video]', function(e) {
     if (parseInt($('#messages').css('height')) != 230) {
       $('#screen-one *').css('height', '295px'); $('#messages').css('height', '230px');

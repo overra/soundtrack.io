@@ -190,6 +190,7 @@ app.redis.get(config.database.name + ':playlist', function(err, playlist) {
 });
 app.socketAuthTokens = [];
 
+//Send a message to all connected sockets
 app.broadcast = function(msg) {
   var json = JSON.stringify(msg);
   for (var id in app.clients) {
@@ -197,11 +198,13 @@ app.broadcast = function(msg) {
   }
 };
 
+//Send a message to a specific socket
 app.whisper = function(id, msg) {
   var json = JSON.stringify(msg);
   app.clients[id].write(json);
 }
 
+//Ping all connected clients
 app.markAndSweep = function(){
   app.broadcast({type: 'ping'}); // we should probably not do this globally... instead, start interval after client connect?
   var time = (new Date()).getTime();
@@ -237,6 +240,7 @@ app.forEachClient = function(fn) {
   }
 }
 
+//Get data from youtube for a specified videoID
 function getYoutubeVideo(videoID, internalCallback) {
   rest.get('http://gdata.youtube.com/feeds/api/videos/'+videoID+'?v=2&alt=jsonc').on('complete', function(data) {
     if (data && data.data) {
@@ -379,6 +383,7 @@ function startMusic() {
   var seekTo = (Date.now() - app.room.playlist[0].startTime) / 1000;
   app.room.track = app.room.playlist[0];
   
+  if (!app.room.playlist[0].sources) { return nextSong(); }
   getYoutubeVideo(app.room.playlist[0].sources['youtube'][0].id, function(track) {
     if (track) {
       app.broadcast({
@@ -407,27 +412,20 @@ function sortPlaylist() {
   }) );
 }
 
+//Skip the currently playing song
 app.post('/skip', /*/requireLogin,/**/ function(req, res) {
   console.log('skip received:');
   console.log(req.user);
   console.log(req.headers);
   
   //Announce who skipped this song
-  res.render('partials/announcement', {
-      message: {
-          message: "&ldquo;" + app.room.track.title + "&rdquo; was skipped by " + req.user.username + "."
+  app.broadcast({
+      type: 'announcement'
+    , data: {
+          message: "'" + app.room.track.title + "' was skipped by " + req.user.username + "."
         , created: new Date()
       }
-    }, function(err, html) {
-      app.broadcast({
-          type: 'announcement'
-        , data: {
-              formatted: html
-            , created: new Date()
-          }
-      });
-    }
-  );
+  });
   
   nextSong();
   res.send({ status: 'success' });
@@ -466,7 +464,14 @@ sock.on('connection', function(conn) {
   conn.pongTime = (new Date()).getTime();
 
   conn.on('data', function(message) {
-    var data = JSON.parse(message);
+    try {
+      var data = JSON.parse(message);
+    }
+    catch (e) {
+      //http://tools.ietf.org/html/rfc6455#section-7.4
+      conn.close(1003, "Invalid JSON");
+      return;
+    }
     switch (data.type) {
       //respond to pings
       case 'pong':
@@ -512,14 +517,51 @@ sock.on('connection', function(conn) {
           conn.close();
         }
         break;
-
+        
+      case 'chat':
+        if (conn.user) {
+          var chat = new Chat({
+              _author: conn.user._id
+            , message: data.chat
+          });
+          
+          chat.save(function(err) {
+            res.render('partials/message', {
+              message: data.chat
+            }, function(err, html) {
+              console.log('got socket chat', html);
+              app.broadcast({
+                  type: 'chat'
+                , data: {
+                      message: data.chat
+                    , _author: {
+                          _id: conn.user._id
+                        , username: conn.user.username
+                        , slug: conn.user.slug
+                        , avatar: conn.user.avatar
+                      }
+                    , formatted: html
+                    , created: new Date()
+                  }
+              });
+              conn.write(JSON.stringify({ status: 'success' }));
+            });
+          });
+        }
+        else {
+          conn.write(JSON.stringify({"error":"User not authenticated"}));
+        }
+        break;
+        
       //echo anything else
       default:
         conn.write(message);
         break;
     }
+
   });
 
+  //Send the newly connected client the current track data
   if (app.room.playlist[0]) {
     conn.write(JSON.stringify({
         type: 'track'
@@ -527,8 +569,11 @@ sock.on('connection', function(conn) {
       , seekTo: (Date.now() - app.room.playlist[0].startTime) / 1000
     }));
   }
+  
 
   conn.on('close', function() {
+  
+    //If this was an authenticated client then we should remove them from the listeners array
     if (conn.user) {
       console.log("connection closed for user " + conn.user.username);
       
@@ -538,6 +583,7 @@ sock.on('connection', function(conn) {
       };
     }
     
+    //Tell all connected clients about this disconnect
     /*app.broadcast({
         type: 'part'
       , data: {
@@ -552,13 +598,34 @@ sock.installHandlers(server, {prefix:'/stream'});
 
 app.get('/', pages.index);
 app.get('/about', pages.about);
+app.get('/angular/:view', function(req, res) {
+  res.render('angular/'+req.param('view'));
+});
 
+//Get the list of songs currently in the playlist
 app.get('/playlist.json', function(req, res) {
   res.send(app.room.playlist);
 });
 
+//Get list of users currently listening in the room
 app.get('/listeners.json', function(req, res) {
   res.send( _.toArray( app.room.listeners ) );
+});
+
+//Get chat history
+app.get('/chat.json', function(req, res) {
+  Chat.find({}).lean().limit(20).sort('-created').populate('_author', {hash: 0, salt:0}).exec(function(err, messages) {
+    async.map(messages, function(message, callback) {
+      res.render('partials/message', {
+        message: message.message
+      }, function(err, html) {
+        message.formatted = html;
+        callback(false, message);
+      });
+    }, function(err, results) {;
+      res.send(results);
+    });
+  });
 });
 
 //client requests that we give them a token to auth their socket
@@ -567,6 +634,7 @@ app.get('/listeners.json', function(req, res) {
 //We use the recorded time to make sure we issued the token recently
 app.post('/socket-auth', requireLogin, auth.configureToken);
 
+//Send a chat message
 app.post('/chat', requireLogin, function(req, res) {
   var chat = new Chat({
       _author: req.user._id
@@ -574,22 +642,19 @@ app.post('/chat', requireLogin, function(req, res) {
   });
   chat.save(function(err) {
     res.render('partials/message', {
-      message: {
-          _author: req.user
-        , message: req.param('message')
-        , created: chat.created
-      }
+      message: req.param('message')
     }, function(err, html) {
       app.broadcast({
           type: 'chat'
         , data: {
               _id: chat._id
+            , message: req.param('message')
             , _author: {
                   _id: req.user._id
                 , username: req.user.username
                 , slug: req.user.slug
+                , avatar: req.user.avatar
               }
-            , message: req.param('message')
             , formatted: html
             , created: new Date()
           }
@@ -599,6 +664,7 @@ app.post('/chat', requireLogin, function(req, res) {
   });
 });
 
+//Vote on a track
 app.post('/playlist/:trackID', requireLogin, function(req, res, next) {
 
   var playlistMap = app.room.playlist.map(function(x) {
@@ -629,6 +695,7 @@ app.post('/playlist/:trackID', requireLogin, function(req, res, next) {
 
 });
 
+//Add a track to the room playlist
 app.post('/playlist', requireLogin, function(req, res) {
   switch(req.param('source')) {
     default:
@@ -665,12 +732,45 @@ app.post('/playlist', requireLogin, function(req, res) {
         res.send({ status: 'success' });
       });
     break;
+    // add a track via its soundtack _id
+    case 'id':
+      Track.findOne({'_id':req.param('id')}).exec(function(err, track) {
+        if (track) {
+          app.room.playlist.push( _.extend( track.toObject() , {
+              score: 0
+            , votes: {} // TODO: auto-upvote?
+            , timestamp: new Date()
+            , curator: {
+                  _id: req.user._id
+                , id: (req.app.room.listeners[ req.user._id.toString() ]) ? req.app.room.listeners[ req.user._id.toString() ].connId : undefined
+                , username: req.user.username
+                , slug: req.user.slug
+              }
+          } ) );
+          
+          sortPlaylist();
+
+          app.redis.set("soundtrack:playlist", JSON.stringify( app.room.playlist ) );
+
+          app.broadcast({
+              type: 'playlist:add'
+            , data: track
+          });
+          
+          res.send({status: 'success'});
+        }
+        else {
+          res.send(500, {status: 'error'})
+        }
+      });
+    break;
   }
 });
 
 app.post('/:usernameSlug/playlists', requireLogin, playlists.create );
 app.post('/:usernameSlug/playlists/:playlistID', requireLogin, playlists.addTrack );
 app.post('/:usernameSlug/playlists/:playlistID/edit', requireLogin, playlists.edit ); // TODO: fix URL
+app.get('/:usernameSlug/playlists', requireLogin, playlists.getPlaylists );
 
 app.get('/register', function(req, res) {
   res.render('register');
@@ -763,3 +863,4 @@ server.listen(config.app.port, function(err) {
   console.log('Must have redis listening on port 6379');
   console.log('Must have mongodb listening on port 27017');
 });
+
