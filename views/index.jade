@@ -29,14 +29,19 @@ block content
 
           if (user)
             .btn-group
-              a.btn(href="#", data-action="skip-track") skip
+              a.btn.btn-mini(href="#", data-action="skip-track") skip
+              if (user && user.roles.indexOf('editor') >= 0)
+                a.btn.btn-mini(href="#", data-action="launch-track-editor", data-for="current-track-id") edit
 
             .btn-group.pull-right
-              a.btn(href="#playlist-modal", data-toggle="modal") your playlists
-              a.btn.dropdown-toggle(href="#", data-toggle="dropdown") add 
+              //-a.btn(href="#playlist-modal", data-toggle="modal") your playlists
+              a.btn.btn-mini.dropdown-toggle(href="#", data-toggle="dropdown") add to 
                 span.caret
               ul.dropdown-menu#user-playlists-dropdown(data-for="user-playlists")
-                for playlist in playlists
+                if (playlists.length >= 10)
+                  li(data-action="new-playlist")
+                    a(href="#create-playlist-modal", data-toggle="modal") Create New &raquo;
+                for playlist in user.playlists
                   li(data-playlist-id="#{playlist._id}")
                     a(data-playlist-id="#{playlist._id}", data-action="save-track") #{playlist.name}
                 li(data-action="new-playlist")
@@ -45,18 +50,37 @@ block content
           //-h3#playlist-summary(ng-bind="'Playlist (' + tracks.length + ')'")
           #playlist
             ul#playlist-list.nav.nav-list(data-intro="If the playlist ever reaches zero, soundtrack.io will automatically choose song based on what's been played in the past.", data-step="3", data-position="right")
-              li(ng-repeat="track in tracks", ng-class="{active: $first}", data-track-id="{{track._id}}")
+              li(ng-repeat="track in tracks", ng-class="{active: $first}", ng-style="{top: ((track.order * 40) + 'px')}", ng-model="track", data-track-id="{{track._id}}")
                 .playlist-controls
                   .score.badge {{track.score}}
                   i.icon-chevron-up.icon-white(data-action="upvote-track", data-track-id="{{track._id}}")
                   i.icon-chevron-down.icon-white(data-action="downvote-track", data-track-id="{{track._id}}")
-                img.thumbnail-medium.pull-left(ng-src="{{track.images.thumbnail.url}}")
-                span(style="font-size: 0.75em;") {{track.curator.username}} wants to play 
-                a(href="/{{track._artist.slug}}/{{track.slug}}/{{track._id}}")
-                  small.pull-right {{track.duration.toString().toHHMMSS()}}
-                  span {{track._artist.name}} &mdash; {{track.title}}
+                  if (user && user.roles.indexOf('editor') >= 0)
+                    .editor-controls
+                      a.btn.btn-mini(href="#", data-action="launch-track-editor", data-track-id="{{track._id}}")
+                        | edit
+                div(style="font-size: 0.75em;")
+                  span.pull-right {{track.duration | toHHMMSS }}
+                  a(href="{{track.curator.slug}}") {{track.curator.username}}
+                  |  wants to play 
+                  if (user &&user.roles.indexOf('admin') >= 0)
+                    |  
+                    a(href="#", data-action="remove-queued-track", data-track-id="{{track._id}}", data-track-index="{{$index}}")
+                      i.icon-remove.icon-white
+                .track-details(style="font-size: 1.1em;")
+                  img.thumbnail-medium.pull-left(ng-src="{{track.images.thumbnail.url}}")
+                  a(href="/{{track._artist.slug}}/{{track.slug}}/{{track._id}}") {{track.title}}
+                .track-details.clearfix
+                  .text-right
+                    .label.label-warning(ng-if="track.flags.nsfw") nsfw
+                    .label(ng-if="track.flags.live") live
+                    |  by 
+                    a(href="/{{track._artist.slug}}") {{track._artist.name}}
 
-          h5 Add Track
+          
+          h5
+            .pull-right.tooltipped(ng-bind="playlistLength | toHHMMSS", title="Length of all tracks in the playlist")
+            | Add Track
           form#search-form.input-append(style="display:block;", data-for="track-search")
             if (user)
               input.input-block-level(type="text", data-for="track-search-query", placeholder="type here and press [ENTER] to search", data-intro="<h5>Queue a song!</h5>Search here for a track to add it to the playlist.", data-step="2", data-position="right")#search-query
@@ -77,7 +101,7 @@ block content
               input.input-block-level(type="text", autocomplete="off", placeholder="click here to join the conversation")#chat-input
               button.btn(type="submit")
                 i.icon-share-alt
-              button.btn(data-action="toggle-video")
+              button.btn(data-action="toggle-video", type="button")
                 i.icon-chevron-up
             else
               input.input-block-level(type="text", autocomplete="off", disabled, placeholder="click here to join the conversation")#chat-input
@@ -96,79 +120,3 @@ block content
               small.pull-right.user-count
               | Users
             ul.nav.nav-list#userlist(data-intro="<h5>One last thing...</h5>We're a work in progress, so you'll have to mind your step.  Until we implement AngularJS, you'll have to middle-click or ctrl+click these links to prevent them from interrupting the music.  Other than that, <strong>please enjoy!</strong>", data-step="5", data-position="left")
-
-block scripts
-
-    #playlist-modal.modal.hide.fade
-      .modal-header
-        button.close(data-dismiss="modal") &times;
-        h3 Your Playlists
-      .modal-body
-        .row-fluid
-          .span4
-            i.icon-globe(title="public")
-            ul.nav.nav-list(data-for="user-playlists")
-              for playlist in playlists
-                li(data-playlist-id="#{playlist._id}")
-                  a(href="/#{user.slug}/#{playlist.slug}")
-                    small.pull-right #{playlist._tracks.length}
-                    input(type="checkbox", data-action="toggle-playlist-visibility", data-playlist-id="#{playlist._id}", checked=(playlist.public ? "checked" : undefined))
-                    |  #{playlist.name}
-          .span8
-            h4 Tracks
-
-      .modal-footer
-        button.btn.btn(data-dismiss="modal") Cancel
-        button.btn.btn-primary.btn-large(data-dismiss="modal") Done
-
-    #search-modal.modal.hide.fade
-      .modal-header
-        button.close(data-dismiss="modal") &times;
-        h3 Track Search
-      .modal-body
-        form(data-for="track-search")
-          .btn-group.pull-right
-            a.btn(data-for="track-search-select-source", data-data="youtube") YouTube
-            a.btn(data-for="track-search-select-source", data-data="soundcloud") SoundCloud
-            a.btn(data-for="track-search-select-source", data-data="playlists") Playlists
-          
-          .input-append
-            input(type="text", data-for="track-search-query")
-            .add-on.btn(data-for="track-search-reset")
-              i.icon-remove
-
-
-        ul.nav.nav-list.search-results(data-for="track-search-results")
-
-      .modal-footer
-        button.btn.btn(data-dismiss="modal") Cancel
-        button.btn.btn-primary.btn-large(data-dismiss="modal") Done
-
-    if (user)
-      form#create-playlist-form(action="/#{user.slug}/playlists", method="post")
-        #create-playlist-modal.modal.hide.fade
-          .modal-header
-            button.close(data-dismiss="modal") &times;
-            h3 Create Playlist
-          .modal-body
-            label(required="required") Name
-            input(type="text", name="name")
-
-            label(required="required") Description
-            textarea(type="text", name="description")
-
-            label
-              input(type="checkbox", name="public", value="true", checked)
-              |  
-              i.icon-globe
-              |  Public
-
-            h4 You'll be adding the following track:
-            h5
-              span.track-artist foo
-              |  &mdash; 
-              span.track-title bar
-
-          .modal-footer
-            button.btn.btn(data-dismiss="modal") Cancel
-            button.btn.btn-primary.btn-large(type="submit") Create Playlist &raquo;

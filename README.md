@@ -13,13 +13,18 @@ Homebrew is recommended for OS X users.
 
 Once you have them installed, go ahead and clone the repository.
 
-    git clone git@github.com:fractaloop/soundtrack.io.git
+    git clone git@github.com:martindale/soundtrack.io.git
     cd soundtrack.io
 
 You will need to fetch the dependencies and then you can start up the server.
 
     npm install
     node soundtrack.js
+
+## API
+
+Deleting tracks:
+`$.ajax('/playlist/520e6bda3cb680003700049c', { type: 'DELETE', data: { index: 1 } });`
 
 ## Contributing
 
